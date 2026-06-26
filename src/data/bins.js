@@ -43,6 +43,13 @@ export const COLLECTION_SCHEDULE = {
   Gilău:     { residual:[1,4], plastic:[2], paper:[3], glass:[6] },
 };
 
+export const WASTE_FRACTIONS = [
+  { key: 'residual', label: 'residual', color: 'black/grey' },
+  { key: 'plastic', label: 'plastic/metal', color: 'yellow' },
+  { key: 'paper', label: 'paper/cardboard', color: 'blue' },
+  { key: 'glass', label: 'glass', color: 'green' },
+];
+
 export const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
 export const getScheduleToday = (district) => {

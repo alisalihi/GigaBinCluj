@@ -1,20 +1,17 @@
-import L from "leaflet";
-import { useEffect, useRef } from "react";
-import { getBinColor, buildPopupContent } from "../utils/binColors";
-import { minutesToLevel } from "../utils/routeOptimizer";
+import { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { getBinColor, buildPopupContent } from '../utils/binColors';
+import { minutesToLevel } from '../utils/routeOptimizer';
+import { fetchHereConfig } from '../utils/hereApi.js';
 
 const makeBinIcon = (bin) => {
   const color = getBinColor(bin);
   const size = bin.fill > 85 ? 30 : 24;
-  const pulse = bin.fill > 90 ? `animation:binPulse 1s infinite;` : "";
-  const ring = bin.contaminated
-    ? "0 0 0 3px #8b5cf6, 0 0 12px rgba(139,92,246,0.5)"
-    : bin.fill > 85
-      ? "0 0 0 2px rgba(239,68,68,0.6), 0 2px 10px rgba(239,68,68,0.4)"
-      : "0 2px 8px rgba(0,0,0,0.5)";
+  const pulse = bin.fill > 90 ? 'animation:binPulse 1s infinite;' : '';
   return L.divIcon({
-    className: "",
-    html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};display:flex;align-items:center;justify-content:center;box-shadow:${ring};font-size:${size > 26 ? 9 : 8}px;font-weight:800;color:#fff;${pulse}">${Math.round(bin.fill)}</div>`,
+    className: '',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(255,255,255,0.95),0 2px 10px rgba(15,23,42,0.28);font-size:${size > 26 ? 9 : 8}px;font-weight:800;color:#fff;${pulse}">${Math.round(bin.fill)}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
@@ -22,212 +19,263 @@ const makeBinIcon = (bin) => {
 
 const makeTruckIcon = (truck) =>
   L.divIcon({
-    className: "",
-    html: `<div style="width:34px;height:20px;border-radius:6px;background:${truck.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;box-shadow:0 0 0 2px rgba(15,23,42,0.9),0 4px 14px rgba(0,0,0,0.5);letter-spacing:0.05em">${truck.label}</div>`,
+    className: '',
+    html: `<div style="width:34px;height:20px;border-radius:5px;background:${truck.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,0.95),0 4px 14px rgba(15,23,42,0.28);letter-spacing:0.05em">${truck.label}</div>`,
     iconSize: [34, 20],
     iconAnchor: [17, 10],
   });
 
-const buildTruckPopupContent = (truck, bins) => {
+const buildTruckPopup = (truck, bins) => {
   const target = truck.routePlan?.[0];
   const targetBin = target ? bins.find((bin) => bin.id === target.binId) : null;
   const loadPct = Math.round(((truck.loadKg ?? 0) / (truck.capacityKg ?? 6500)) * 100);
   const targetText = targetBin
     ? `${targetBin.name} (${Math.round(targetBin.fill)}%)`
-    : truck.status === "returning"
-      ? "Depot"
-      : "No live dispatch target";
+    : truck.status === 'returning'
+      ? 'Depot'
+      : 'No destination';
 
   return `
-    <div style="min-width:190px;font-family:Inter,system-ui,sans-serif;color:#e2e8f0;background:#0f172a;padding:10px;border-radius:10px">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
-        <strong style="font-size:13px">${truck.label}</strong>
-        <span style="font-size:10px;text-transform:uppercase;color:#94a3b8">${truck.status ?? "available"}</span>
-      </div>
-      <div style="margin-top:7px;font-size:11px;color:#cbd5e1">Target: <strong>${targetText}</strong></div>
-      <div style="margin-top:4px;font-size:11px;color:#cbd5e1">Load: ${Math.round(truck.loadKg ?? 0)}kg / ${truck.capacityKg ?? 6500}kg (${loadPct}%)</div>
-      ${
-        target
-          ? `<div style="margin-top:4px;font-size:11px;color:#93c5fd">ETA ${target.etaMin}m · ${target.reason}</div>`
-          : ""
-      }
+    <div style="min-width:200px;font-family:Inter,system-ui,sans-serif;color:#0f172a">
+      <strong style="color:#005BAA">${truck.label}</strong>
+      <div style="margin-top:6px;font-size:12px">Target: ${targetText}</div>
+      <div style="font-size:12px">Load: ${Math.round(truck.loadKg ?? 0)}kg (${loadPct}%)</div>
+      ${target ? `<div style="font-size:12px;color:#005BAA;font-weight:600">ETA ${target.etaMin ?? target.cumulativeMin ?? '?'}m · ${target.reason}</div>` : ''}
+      ${truck.totalRouteKm ? `<div style="font-size:11px;color:#64748b">HERE route: ${truck.totalRouteKm} km / ${truck.totalRouteMin} min</div>` : ''}
     </div>`;
 };
 
 const CHIP = {
-  overflow: "border-rose-500/30 bg-rose-500/15 text-rose-200",
-  contamination: "border-purple-500/30 bg-purple-500/15 text-purple-200",
-  ok: "border-emerald-500/30 bg-emerald-500/15 text-emerald-200",
-  route: "border-blue-500/30 bg-blue-500/15 text-blue-200",
+  overflow: 'border-[#E31E24]/30 bg-white text-[#B91C1C]',
+  contamination: 'border-violet-500/30 bg-white text-violet-700',
+  ok: 'border-emerald-500/30 bg-white text-emerald-700',
+  route: 'border-[#0099D8]/30 bg-white text-[#005BAA]',
 };
 
-export const MapPanel = ({ bins, trucks, alerts }) => {
-  const mapDivRef = useRef(null); // ref to the DOM element
-  const stateRef = useRef(null); // ref to leaflet state
+const hereTileUrl = (apiKey) =>
+  `https://maps.hereapi.com/v3/base/mc/{z}/{x}/{y}/png8?style=explore.day&apiKey=${apiKey}`;
+
+const fallbackTileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+
+export const MapPanel = ({ bins, trucks, alerts, onMapReady }) => {
+  const mapDivRef = useRef(null);
+  const stateRef = useRef(null);
+  const onMapReadyRef = useRef(onMapReady);
+  const [mapError, setMapError] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapProvider, setMapProvider] = useState('Fallback map');
+
+  useEffect(() => {
+    onMapReadyRef.current = onMapReady;
+  }, [onMapReady]);
+
   const liveOverride = bins.some(
     (bin) => bin.fill > 85 || bin.contaminated || (bin.fill < 90 && minutesToLevel(bin, 90) <= 120),
   );
 
   useEffect(() => {
-    // Wait until the div is in the DOM
-    if (!mapDivRef.current || stateRef.current) return;
+    let map = null;
+    let resizeObserver;
+    let cancelled = false;
 
-    const map = L.map(mapDivRef.current, {
-      center: [46.76, 23.58],
-      zoom: 12,
-      zoomControl: true,
-      attributionControl: false,
-    });
+    const init = async () => {
+      const container = mapDivRef.current;
+      if (!container || stateRef.current) return;
 
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      {
-        maxZoom: 19,
-      },
-    ).addTo(map);
+      try {
+        let config = null;
+        try {
+          config = await fetchHereConfig();
+        } catch {
+          config = { hereApiKey: null };
+        }
+        if (cancelled) return;
 
-    L.control
-      .attribution({ prefix: "© OpenStreetMap · CartoDB · Supercom SA data" })
-      .addTo(map);
+        map = L.map(container, {
+          center: [46.76, 23.58],
+          zoom: 12,
+          zoomControl: true,
+          attributionControl: false,
+        });
 
-    stateRef.current = {
-      map,
-      binMarkers: {},
-      truckMarkers: {},
-      routeLayers: {},
+        L.tileLayer(config.hereApiKey ? hereTileUrl(config.hereApiKey) : fallbackTileUrl, {
+          maxZoom: 20,
+          attribution: config.hereApiKey ? '© HERE · Supercom SA' : '© OpenStreetMap · CartoDB',
+        }).addTo(map);
+
+        L.control
+          .attribution({ prefix: config.hereApiKey ? '© HERE · Cluj-Napoca City Hall' : 'Fallback map · Cluj-Napoca City Hall' })
+          .addTo(map);
+
+        stateRef.current = {
+          map,
+          binMarkers: {},
+          truckMarkers: {},
+          routeLayers: {},
+        };
+
+        const resize = () => map?.invalidateSize();
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(container);
+        setTimeout(resize, 100);
+        setTimeout(resize, 400);
+
+        if (!cancelled) {
+          setMapProvider(config.hereApiKey ? 'HERE' : 'Fallback map');
+          setMapReady(true);
+          setMapError(null);
+          onMapReadyRef.current?.(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMapError(error.message);
+          onMapReadyRef.current?.(false);
+        }
+      }
     };
 
-    // ── FIX 1: invalidateSize after a short delay so the container
-    //           has its final CSS dimensions before tiles are requested
-    setTimeout(() => map.invalidateSize(), 100);
-    setTimeout(() => map.invalidateSize(), 400);
-
-    // ── FIX 2: ResizeObserver keeps tiles correct if the layout shifts
-    //           (e.g. sidebar opens, window resizes, agent log slides up)
-    const ro = new ResizeObserver(() => map.invalidateSize());
-    ro.observe(mapDivRef.current);
+    init();
 
     return () => {
-      ro.disconnect();
-      map.remove();
+      cancelled = true;
+      resizeObserver?.disconnect();
+      if (map) {
+        map.remove();
+        map = null;
+      }
       stateRef.current = null;
+      setMapReady(false);
+      onMapReadyRef.current?.(false);
     };
   }, []);
 
   useEffect(() => {
     const s = stateRef.current;
-    if (!s) return;
-    const { map, binMarkers } = s;
+    if (!s || !mapReady) return;
+    const { map, binMarkers, truckMarkers, routeLayers } = s;
+
     bins.forEach((bin) => {
       if (!binMarkers[bin.id]) {
-        binMarkers[bin.id] = L.marker([bin.lat, bin.lng], {
-          icon: makeBinIcon(bin),
-        })
+        binMarkers[bin.id] = L.marker([bin.lat, bin.lng], { icon: makeBinIcon(bin) })
           .bindPopup(buildPopupContent(bin), { maxWidth: 230 })
           .addTo(map);
       } else {
+        binMarkers[bin.id].setLatLng([bin.lat, bin.lng]);
         binMarkers[bin.id].setIcon(makeBinIcon(bin));
-        if (binMarkers[bin.id].isPopupOpen())
+        if (binMarkers[bin.id].isPopupOpen()) {
           binMarkers[bin.id].setPopupContent(buildPopupContent(bin));
+        }
       }
     });
-  }, [bins]);
 
-  useEffect(() => {
-    if (!stateRef.current) return;
-    const { map, truckMarkers, routeLayers } = stateRef.current;
     trucks.forEach((truck) => {
       if (!truckMarkers[truck.id]) {
         truckMarkers[truck.id] = L.marker([truck.lat, truck.lng], {
           icon: makeTruckIcon(truck),
           zIndexOffset: 1000,
         })
-          .bindPopup(buildTruckPopupContent(truck, bins), { maxWidth: 240 })
+          .bindPopup(buildTruckPopup(truck, bins), { maxWidth: 240 })
           .addTo(map);
       } else {
         truckMarkers[truck.id].setLatLng([truck.lat, truck.lng]);
         truckMarkers[truck.id].setIcon(makeTruckIcon(truck));
         if (truckMarkers[truck.id].isPopupOpen()) {
-          truckMarkers[truck.id].setPopupContent(buildTruckPopupContent(truck, bins));
+          truckMarkers[truck.id].setPopupContent(buildTruckPopup(truck, bins));
         }
       }
+
+      if (routeLayers[truck.id]) {
+        map.removeLayer(routeLayers[truck.id]);
+        delete routeLayers[truck.id];
+      }
+
+      const points =
+        truck.routeGeometry?.length > 1
+          ? truck.routeGeometry.map((p) => [p.lat, p.lng])
+          : [
+              [truck.lat, truck.lng],
+              ...truck.route
+                .map((id) => bins.find((b) => b.id === id))
+                .filter(Boolean)
+                .map((b) => [b.lat, b.lng]),
+            ];
+
+      if (points.length > 1) {
+        routeLayers[truck.id] = L.polyline(points, {
+          color: truck.color,
+          weight: truck.routeGeometry?.length > 1 ? 4 : 3,
+          opacity: 0.7,
+          dashArray: '8 6',
+        }).addTo(map);
+      }
     });
-    Object.values(routeLayers).forEach((l) => map.removeLayer(l));
-    trucks.forEach((truck) => {
-      if (!truck.route.length) return;
-      const pts = [
-        [truck.lat, truck.lng],
-        ...truck.route
-          .map((id) => {
-            const b = bins.find((x) => x.id === id);
-            return b ? [b.lat, b.lng] : null;
-          })
-          .filter(Boolean),
-      ];
-      routeLayers[truck.id] = L.polyline(pts, {
-        color: truck.color,
-        weight: 2.5,
-        opacity: 0.65,
-        dashArray: "8 5",
-      }).addTo(map);
-    });
-  }, [trucks, bins]);
+  }, [bins, trucks, mapReady]);
 
   return (
-    <section className="relative flex-1 overflow-hidden">
-      <div ref={mapDivRef} className="h-full w-full" />
+    <section className="relative min-h-0 flex-1 overflow-hidden" data-testid="map-panel">
+      <div ref={mapDivRef} className="absolute inset-0 z-0" />
 
-      {/* Alert chips */}
-      <div className="absolute left-3 top-3 z-[1000] flex flex-col gap-1.5 pointer-events-none max-w-[230px]">
+      {!mapReady && !mapError && (
+        <div className="absolute inset-0 z-[1001] flex items-center justify-center bg-white/80 text-sm font-semibold text-slate-600">
+          Loading HERE map...
+        </div>
+      )}
+
+      {mapError && (
+        <div className="absolute inset-0 z-[1002] flex items-center justify-center bg-white/95 p-6 text-center text-sm font-semibold text-[#B91C1C]">
+          HERE map did not load: {mapError}.
+          <br />
+          <span className="mt-2 block text-xs font-normal text-slate-500">
+            Start the backend with <code className="text-[#005BAA]">npm run start:server</code> and reload the page.
+          </span>
+        </div>
+      )}
+
+      <div className="pointer-events-none absolute left-3 top-3 z-[1000] flex max-w-[240px] flex-col gap-1.5">
         {alerts.map((a) => (
           <div
             key={a.id}
-            className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold backdrop-blur-md animate-fade-in ${CHIP[a.type] ?? CHIP.overflow}`}
+            className={`animate-fade-in rounded-full border px-3 py-1.5 text-[11px] font-bold shadow-md backdrop-blur-md ${CHIP[a.type] ?? CHIP.overflow}`}
           >
             {a.text}
           </div>
         ))}
       </div>
 
-      <div className="absolute right-4 top-4 z-[1000] max-w-[320px] rounded-xl border border-slate-700/70 bg-slate-950/92 px-3 py-2 text-[11px] shadow-xl backdrop-blur-md">
+      <div className="absolute right-4 top-4 z-[1000] max-w-[340px] rounded-lg border border-slate-200 bg-white/95 px-3 py-2 text-[11px] shadow-xl backdrop-blur-md">
         <div className="flex items-center justify-between gap-3">
-          <span className="font-black uppercase tracking-widest text-slate-500">Dispatch policy</span>
+          <span className="font-black uppercase tracking-widest text-[#005BAA]">Municipal waste dispatch</span>
           <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${
-            liveOverride ? "bg-sky-500/20 text-sky-200" : "bg-slate-800 text-slate-500"
+            liveOverride ? 'bg-[#0099D8]/10 text-[#005BAA]' : 'bg-slate-100 text-slate-500'
           }`}>
-            {liveOverride ? "Live override" : "Schedule baseline"}
+            {liveOverride ? 'Live override' : 'Baseline schedule'}
           </span>
         </div>
-        <div className="mt-1.5 text-slate-400">
-          Fixed collection days are a baseline. The agent reroutes when fill level, contamination, predicted overflow, ETA, or truck capacity changes the priority.
+        <div className="mt-1.5 text-slate-600">
+          Live truck location and route status - Supercom SA operator context (0264-954).
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-[1000] rounded-2xl border border-slate-700/60 bg-slate-900/92 backdrop-blur-md px-4 py-3 text-[11px] text-slate-300 shadow-xl">
+      <div className="absolute bottom-4 left-4 z-[1000] rounded-lg border border-slate-200 bg-white/95 px-4 py-3 text-[11px] font-medium text-slate-700 shadow-xl backdrop-blur-md">
         {[
-          ["#22c55e", "Low (<60%)"],
-          ["#f59e0b", "High (60–85%)"],
-          ["#ef4444", "Overflow (>85%)"],
-          ["#8b5cf6", "Contaminated"],
+          ['#22c55e', 'Low (<60%)'],
+          ['#f59e0b', 'High (60-85%)'],
+          ['#ef4444', 'Overflow (>85%)'],
+          ['#8b5cf6', 'Contaminated'],
         ].map(([c, l]) => (
           <div key={l} className="flex items-center gap-2 py-0.5">
-            <div
-              className="h-2.5 w-2.5 rounded-full shrink-0"
-              style={{ background: c }}
-            />
+            <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c }} />
             {l}
           </div>
         ))}
         <div className="flex items-center gap-2 py-0.5">
-          <div className="h-2.5 w-2.5 rounded-sm shrink-0 bg-blue-500" />
-          Truck (routing)
+          <div className="h-2.5 w-2.5 shrink-0 rounded-sm bg-[#005BAA]" />
+          Truck route (HERE)
         </div>
       </div>
 
-      {/* Data source badge */}
-      <div className="absolute bottom-4 right-4 z-[1000] rounded-xl border border-slate-700/40 bg-slate-900/85 px-3 py-1.5 text-[10px] text-slate-500 backdrop-blur-sm">
-        Simulation · real data: Supercom SA Cluj · operator: Supercom SA
+      <div className="absolute bottom-4 right-4 z-[1000] rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 text-[10px] font-medium text-slate-500 shadow-sm backdrop-blur-sm">
+        {mapProvider === 'HERE' ? '© HERE' : 'Fallback map'} · Supercom SA · Cluj-Napoca City Hall
       </div>
     </section>
   );

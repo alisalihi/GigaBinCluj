@@ -1,4 +1,3 @@
-const EARTH_RADIUS_KM = 6371;
 const MAX_ROUTE_STOPS = 5;
 const MIN_HOME_FILL = 58;
 const EMERGENCY_FILL = 90;
@@ -15,7 +14,7 @@ export const distanceKm = (a, b) => {
   const h =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * EARTH_RADIUS_KM * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return 2 * 6371 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
 export const estimateFillPerHour = (bin) => {
@@ -65,7 +64,7 @@ const getRouteReason = (bin, isHomeZone) => {
   if (bin.fill >= EMERGENCY_FILL) return isHomeZone ? 'overflow priority' : 'cross-zone emergency';
   if (minutesToLevel(bin, 90) <= 90) return 'predicted overflow';
   if ((bin.fillRate ?? 0) > (bin.fillRateMultiplier ?? 1) * 1.25) return 'schedule pressure';
-  return 'live fill priority';
+  return 'fill-level priority';
 };
 
 const scoreCandidate = (truck, bin) => {
@@ -84,6 +83,8 @@ const scoreCandidate = (truck, bin) => {
     binId: bin.id,
     binName: bin.name,
     district: bin.district,
+    lat: bin.lat,
+    lng: bin.lng,
     fill: bin.fill,
     urgency,
     score,
@@ -122,6 +123,17 @@ const keepCurrentTargetWhenReasonable = (truck, candidates) => {
   return candidates;
 };
 
+export const computeRouteCandidates = (truck, bins) => {
+  const candidates = bins
+    .filter((bin) => shouldConsiderBin(truck, bin))
+    .map((bin) => scoreCandidate(truck, bin))
+    .filter((candidate) => candidate.score > 20)
+    .sort((a, b) => b.score - a.score);
+
+  const stable = keepCurrentTargetWhenReasonable(truck, candidates);
+  return stable.slice(0, MAX_ROUTE_STOPS);
+};
+
 export const computeRoutes = (bins, trucks) => {
   const firstTargets = new Set();
 
@@ -130,14 +142,7 @@ export const computeRoutes = (bins, trucks) => {
       return { ...truck, route: truck.route ?? [], routePlan: truck.routePlan ?? [] };
     }
 
-    const candidates = bins
-      .filter((bin) => shouldConsiderBin(truck, bin))
-      .map((bin) => scoreCandidate(truck, bin))
-      .filter((candidate) => candidate.score > 20)
-      .sort((a, b) => b.score - a.score);
-
-    const stable = keepCurrentTargetWhenReasonable(truck, candidates);
-    const deduped = stable.filter((candidate, index) => {
+    const routePlan = computeRouteCandidates(truck, bins).filter((candidate, index) => {
       if (index > 0) return true;
       if (!firstTargets.has(candidate.binId)) {
         firstTargets.add(candidate.binId);
@@ -146,10 +151,9 @@ export const computeRoutes = (bins, trucks) => {
       return false;
     });
 
-    const routePlan = deduped.slice(0, MAX_ROUTE_STOPS);
     return {
       ...truck,
-      routeIdx: 0,
+      routeIdx: truck.routeIdx ?? 0,
       activeTargetId: routePlan[0]?.binId ?? null,
       route: routePlan.map((stop) => stop.binId),
       routePlan,
